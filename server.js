@@ -25,6 +25,10 @@ function broadcastUsers(flightCode) {
     });
 }
 
+app.get("/health", (req, res) => {
+    res.status(200).send("OK");
+});
+
 io.on("connection", (socket) => {
 
     socket.on("createFlight", (callback) => {
@@ -104,4 +108,4 @@ io.on("connection", (socket) => {
 
 
 
-server.listen(4000 , () => console.log("Websocket is up on port 4000"));
+server.listen(5500 , () => console.log("Websocket is up on port 5500"));
