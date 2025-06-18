@@ -267,7 +267,7 @@ io.on("connection", (socket) => {
 
     });
 
-    socket.emit("yourName" ,  name );
+    socket.emit("yourName" , {id : socket.id , name });
 });
 
 
