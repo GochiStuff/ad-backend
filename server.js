@@ -2,6 +2,9 @@ import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import { nanoid } from "nanoid";
+import { Stat } from "./model/stats.model.js";
+import { connectDB } from "./db/mongodb.js";
+
 
 function generateCode(){
     return nanoid(6).toUpperCase();
@@ -9,39 +12,41 @@ function generateCode(){
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server , {cors : {origin : "*"}});
+const io = new Server(server, {
+  cors: {
+    origin: ["https://airdelivery.site"],
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
 
-
-
-// statics and analysis .  TODO 
-const stats = {
-  totalUsersEver: 0,
-  currentUsers: 0,
-  totalFlightsCreated: 0,
-//   activeFlights: 0,
-//   totalDataSentBytes: 0,
-//   totalFilesSent: 0,
-//   totalFlightJoins: 0,
-//   totalFlightLeaves: 0,
-//   disconnectReasons: {},
-//   ipPrefixCounts: new Map(), // e.g. {"192.168.1": 5}
-};
 
 const namePool = [
-  "Pikachu", "Snorlax", "Magikarp", "Garchomp", "Wobbuffet",
-  "Bidoof", "Ducklett", "Goomy", "Quagsire", "Bewear"
+  // Pokémon-inspired
+  "Pika", "Zard", "Eevee", "Magi", "Snorlax",
+  "Ditto", "Mew", "Lucar", "Goomy", "Toge",
+  "Gren", "Chomp", "Infern", "Bidoof", "Sylv",
+  "Scorb", "Quag", "Zoroa", "Sable", "Piplup",
+
+  // Anime-inspired (from Naruto, DBZ, One Piece, etc.)
+  "Luffy", "Zoro", "Goku", "Vegeta", "Itachi",
+  "Kakashi", "Sasuke", "Levi", "Eren", "Nami",
+  "Killua", "Gon", "Gojo", "Tanji", "Nezuko",
+  "Baki", "Yugi", "Natsu", "Shoto", "Lain"
 ];
+
 
 function getRandomName() {
   const i = Math.floor(Math.random() * namePool.length);
   return namePool[i];
 }
 
-function getIpPrefix(socket){
-    const ip = socket.handshake.address;
-    const ipv4  = ip.includes("::ffff:") ? ip.split("::ffff:")[1] : ip;
-    return ipv4?.split(".")?.slice(0,3)?.join(".");
- }
+function getIpPrefix(socket) {
+  const ip = socket.handshake.headers["x-forwarded-for"] || socket.handshake.address;
+  const ipv4 = ip.includes("::ffff:") ? ip.split("::ffff:")[1] : ip;
+  return ipv4?.split(".")?.slice(0, 3)?.join(".");
+}
+
 
 
 // { ownerId: socketId, members: [socketId] }
@@ -87,9 +92,6 @@ io.on("connection", (socket) => {
     const name = getRandomName();
     const ipPrefix = getIpPrefix(socket);
 
-    stats.totalUsersEver++;
-    stats.currentUsers++;
-
 
     nearByUsers.set(socket.id, { name, ipPrefix, inFlight: false });
 
@@ -112,14 +114,19 @@ io.on("connection", (socket) => {
             nearByUsers.set(socket.id, user);
         }
 
-        stats.totalFlightsCreated++;
-        const now = new Date();    
-        console.log( now.toLocaleDateString(), " : " ,now.toLocaleTimeString() , " :-> TOTAL FLIGHTS TAKE : " , stats.totalFlightsCreated ,  " | USERS : " , stats.totalUsersEver, " | Active Users : " , stats.totalUsersEver);
-
+        Stat.updateOne(
+        { date: { $gte: new Date().setHours(0,0,0,0) } },
+        { $inc: { totalFlights: 1 } },
+        { upsert: true }
+        ).exec();
         socket.join(code);
         callback({code});
 
         broadcastUsers(code);
+    });
+
+    socket.on("feedback" , ( payload) => { 
+        
     });
 
     socket.on("requestToConnect", (targetId, callback) => {
@@ -249,7 +256,7 @@ io.on("connection", (socket) => {
     socket.on("disconnect", () => {
 
         nearByUsers.delete(socket.id);
-        stats.currentUsers--;
+    
 
         for (const [code, flight] of flights.entries()) {
 
@@ -275,7 +282,25 @@ io.on("connection", (socket) => {
 // Periodic cleanups + use lastseen time stamps . 
 
 
+setInterval(() => {
+  for (const [code, flight] of flights.entries()) {
+    const inactiveTooLong = flight.members.length === 0 || !flight.ownerConnected;
+    if (inactiveTooLong) {
+      flights.delete(code);
+      console.log(`[CLEANUP] Removed inactive flight: ${code}`);
+    }
+  }
+}, 120 * 1000); // every 120 seconds
 
 
 
-server.listen(5500 , () => console.log("Websocket is up on port 5500"));
+
+server.listen(5500 , async() => {
+    try {
+    await connectDB()
+    console.log(` Server running on port 5500`)
+  } catch (err) {
+    console.error(' DB connection failed:', err.message)
+    process.exit(1)
+  }
+});
