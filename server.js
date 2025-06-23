@@ -49,6 +49,7 @@ const flights = new Map();
 // socketid -> { name, ipPrefix, inFlight: boolean }
 const nearByUsers = new Map();
 
+// const joinRequest = new Map(); not need as for now I only allow connection to be made by near by .
 
 function broadcastNearbyUsers(socket) {
   const user = nearByUsers.get(socket.id);
@@ -263,6 +264,36 @@ io.on("connection", (socket) => {
             io.to(payload.id).emit("ice-candidate", { from: socket.id, candidate: payload.candidate });
         }
     });
+
+    socket.on("leaveFlight", () => {
+  const user = nearByUsers.get(socket.id);
+  if (user) {
+    user.inFlight = false;
+    nearByUsers.set(socket.id, user);
+  }
+
+  let flightCodeToDelete  = "";
+
+  for (const [code, flight] of flights.entries()) {
+    if (flight.ownerId === socket.id) {
+      flight.ownerConnected = false;
+      broadcastUsers(code);
+      flightCodeToDelete = code;
+      break;
+    } else {
+      const wasMember = flight.members.includes(socket.id);
+      flight.members = flight.members.filter(id => id !== socket.id);
+      if (wasMember) {
+        broadcastUsers(code);
+        break;
+      }
+    }
+  }
+
+  if (flightCodeToDelete) {
+    flights.delete(flightCodeToDelete);
+  }
+});
 
     socket.on("disconnect", () => {
 
