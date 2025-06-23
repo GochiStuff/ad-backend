@@ -14,7 +14,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: ["https://airdelivery.site", "http://localhost:3000"],
+        origin: ["https://airdelivery.site", "http://localhost:3000" , ""],
         methods: ["GET", "POST"],
         credentials: true
     }
@@ -66,7 +66,6 @@ function broadcastNearbyUsers(socket) {
       Array.from(data.ipPrefixes).some(prefix => userPrefixes.includes(prefix))
     )
     .map(([id, data]) => ({ id, name: data.name }));
-
   socket.emit("nearbyUsers", nearby);
 }
 
@@ -202,12 +201,19 @@ io.on("connection", (socket) => {
 
     
     socket.on("registerLocalIp", ({ localIP }) => {
-        const user = nearByUsers.get(socket.id);
-        if (user) {
-        const prefix = localIP.split(".").slice(0, 3).join(".");
-        user.ipPrefixes.add(prefix);
-        nearByUsers.set(socket.id, user);
-    }})
+    const user = nearByUsers.get(socket.id);
+    if (user && typeof localIP === "string") {
+            const prefix = localIP.split(".").slice(0, 3).join(".");
+            
+            // Replace old prefixes with only the current one
+            user.ipPrefixes = new Set([prefix]);
+            
+            nearByUsers.set(socket.id, user);
+
+            console.log("USER", user, "\nLOCALIP", localIP);
+        }
+    });
+
 
 
 
