@@ -210,7 +210,6 @@ io.on("connection", (socket) => {
             
             nearByUsers.set(socket.id, user);
 
-            console.log("USER", user, "\nLOCALIP", localIP);
         }
     });
 
