@@ -4,14 +4,26 @@ import { Server } from "socket.io";
 import { nanoid } from "nanoid";
 import { Stat } from "./model/stats.model.js";
 import { connectDB } from "./db/mongodb.js";
-
+import feedbackRoute from "./routes/feedback.route.js";
+import cors from "cors";
 
 function generateCode() {
     return nanoid(6).toUpperCase();
 }
 
 const app = express();
+app.use(express.json());
 const server = http.createServer(app);
+app.use(cors({
+  origin: ["https://airdelivery.site", "http://localhost:3000"],
+  methods: ["GET", "POST"],
+  credentials: true
+}));
+
+
+
+
+
 const io = new Server(server, {
     cors: {
         origin: ["https://airdelivery.site", "http://localhost:3000" , ""],
@@ -85,6 +97,8 @@ function broadcastUsers(flightCode) {
     });
 }
 
+// rest . 
+app.use("/api/v1/feedback" ,feedbackRoute);
 app.get("/health", (req, res) => {
     res.status(200).send("OK");
 });
@@ -126,9 +140,23 @@ io.on("connection", (socket) => {
         broadcastUsers(code);
     });
 
-    socket.on("feedback", (payload) => {
+    socket.on("updateStats", ({ filesShared, Transferred }) => {
 
+
+    // Data recived in MB 
+    Stat.updateOne(
+        { date: { $gte: new Date().setHours(0, 0, 0, 0) } },
+        {
+        $inc: {
+            totalFilesShared: filesShared || 0,
+            totalMBTransferred: Transferred || 0,
+        },
+        },
+        { upsert: true }
+    ).exec();
     });
+
+
 
     socket.on("requestToConnect", (targetId, callback) => {
         if (!io.sockets.sockets.has(targetId)) {
