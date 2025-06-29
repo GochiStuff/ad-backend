@@ -229,16 +229,16 @@ io.on("connection", (socket) => {
 
     
     socket.on("registerLocalIp", ({ localIP }) => {
-    const user = nearByUsers.get(socket.id);
-    if (user && typeof localIP === "string") {
-            const prefix = localIP.split(".").slice(0, 3).join(".");
+    // const user = nearByUsers.get(socket.id);
+    // if (user && typeof localIP === "string") {
+    //         const prefix = localIP.split(".").slice(0, 3).join(".");
             
-            // Replace old prefixes with only the current one
-            user.ipPrefixes = new Set([prefix]);
+    //         // Replace old prefixes with only the current one
+    //         user.ipPrefixes = new Set([prefix]);
             
-            nearByUsers.set(socket.id, user);
+    //         nearByUsers.set(socket.id, user);
 
-        }
+    //     }
     });
 
 
