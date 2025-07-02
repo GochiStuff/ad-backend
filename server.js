@@ -7,7 +7,6 @@ import { connectDB } from "./db/mongodb.js";
 import feedbackRoute from "./routes/feedback.route.js";
 import cors from "cors";
 import Peer from "./peer.js";
-import { NODE_ENV } from "./config/env.js";
 
 function generateCode() {
     return nanoid(6).toUpperCase();
@@ -258,6 +257,7 @@ io.on("connection", (socket) => {
             }
 
             // USER LOG 
+            console.log("SUCCESS");
             
 
             callback({ success: true });

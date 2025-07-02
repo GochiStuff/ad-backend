@@ -1,4 +1,3 @@
-import { NODE_ENV } from "./config/env.js";
 
 
 export default class Peer{
@@ -34,9 +33,8 @@ export default class Peer{
         this.ipPrefix = isPrivate ? this.ip.split('.').slice(0,3).join('.') : null;
         
         //  DEBUG 
-        if (NODE_ENV) {
-            console.log("NEW IP:", this.ip, "| Private:", this.isPrivate, "| Prefix:", this.ipPrefix);
-        }
+        console.log("NEW IP:", this.ip, "| Private:", this.isPrivate, "| Prefix:", this.ipPrefix);
+        
         
     }
 
