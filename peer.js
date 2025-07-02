@@ -27,11 +27,21 @@ export default class Peer{
 
         // Private IP detection
 
-        const isPrivate = ip === ip === '::1' || this.ipIsPrivate(ip);
+        const isPrivate = this.ipIsPrivate(ip);
         this.isPrivate = isPrivate;
-        this.ip = isPrivate ? '127.0.0.1' : ip;
-        this.ipPrefix = isPrivate ? this.ip.split('.').slice(0,3).join('.') : null;
-        
+        this.ip = (ip === '::1' || isPrivate) ? '127.0.0.1' : ip;
+
+        if (this.ip === '127.0.0.1') {
+            this.ipPrefix = null; // loopback ignored
+        } else {
+            const parts = this.ip.split('.');
+            this.ipPrefix = isPrivate ? parts.slice(0, 3).join('.') : parts.slice(0, 2).join('.');
+        }
+
+        // grouping 
+        // Private IPs by /24 subnet: 192.168.1.x → 192.168.1
+        // Public IPs by /16 prefix: 45.250.48.206 → 45.250
+
         //  DEBUG 
         console.log("NEW IP:", this.ip, "| Private:", this.isPrivate, "| Prefix:", this.ipPrefix);
         

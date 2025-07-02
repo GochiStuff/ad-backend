@@ -66,19 +66,30 @@ const nearBy = new Map(); // this is called nearby but is handling users .
 
 function broadcastNearbyUsers(socket) {
   const user = nearBy.get(socket.id);
-  if (!user || !user.ipPrefix || !user.isPrivate) return;
+  if (!user || !user.ipPrefix) return;
 
   const nearby = Array.from(nearBy.entries())
-    .filter(([id, data]) => 
-      id !== socket.id &&
-      !data.inFlight &&
-      data.isPrivate &&                      // must be private
-      data.ipPrefix === user.ipPrefix       // same subnet
-    )
+    .filter(([id, data]) => {
+      if (id === socket.id || data.inFlight || !data.ipPrefix) return false;
+
+      // LAN users must be private and same /24
+      if (user.isPrivate && data.isPrivate) {
+        return data.ipPrefix === user.ipPrefix;
+      }
+
+      // Public IP case (e.g  mobile hotspot): allow same /16 public
+      if (!user.isPrivate && !data.isPrivate) {
+        return data.ipPrefix === user.ipPrefix;
+      }
+
+      // Don’t mix public & private or mismatch
+      return false;
+    })
     .map(([id, data]) => ({ id, name: data.name }));
 
   socket.emit("nearbyUsers", nearby);
 }
+
 
 
 
@@ -108,7 +119,8 @@ io.on("connection", (socket) => {
  
 
     const peer = new Peer(socket , socket.request);
-    nearBy.set(socket.id , { name , ipPrefixes: peer.ip , inFlight : false , isPrivate: peer.isPrivate })
+    nearBy.set(socket.id, {name, ipPrefix: peer.ipPrefix, isPrivate: peer.isPrivate, ip: peer.ip, inFlight: false });
+
 
     socket.on("createFlight", (callback) => {
         let code;
