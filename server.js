@@ -6,6 +6,8 @@ import { Stat } from "./model/stats.model.js";
 import { connectDB } from "./db/mongodb.js";
 import feedbackRoute from "./routes/feedback.route.js";
 import cors from "cors";
+import Peer from "./peer.js";
+import { NODE_ENV } from "./config/env.js";
 
 function generateCode() {
     return nanoid(6).toUpperCase();
@@ -59,25 +61,23 @@ function getRandomName() {
 // { ownerId: socketId, members: [socketId] }
 const flights = new Map();
 // socketid -> { name, ipPrefix, inFlight: boolean }
-const nearByUsers = new Map();
+const nearBy = new Map(); // this is called nearby but is handling users .
 
 // const joinRequest = new Map(); not need as for now I only allow connection to be made by near by .
 
 function broadcastNearbyUsers(socket) {
-  const user = nearByUsers.get(socket.id);
-  if (!user) return;
+  const user = nearBy.get(socket.id);
+  if (!user || !user.ipPrefix || !user.isPrivate) return;
 
-  const userPrefixes = Array.from(user.ipPrefixes);
-
-  const nearby = Array.from(nearByUsers.entries())
+  const nearby = Array.from(nearBy.entries())
     .filter(([id, data]) => 
       id !== socket.id &&
       !data.inFlight &&
-      data.ipPrefixes &&
-      data.ipPrefixes.size > 0 &&
-      Array.from(data.ipPrefixes).some(prefix => userPrefixes.includes(prefix))
+      data.isPrivate &&                      // must be private
+      data.ipPrefix === user.ipPrefix       // same subnet
     )
     .map(([id, data]) => ({ id, name: data.name }));
+
   socket.emit("nearbyUsers", nearby);
 }
 
@@ -91,7 +91,7 @@ function broadcastUsers(flightCode) {
         ownerId: flight.ownerId,
         members: flight.members.map(id => ({
             id,
-            name: nearByUsers.get(id)?.name || "Unknown"
+            name: nearBy.get(id)?.name || "Unknown"
         })),
         ownerConnected: flight.ownerConnected
     });
@@ -108,7 +108,8 @@ io.on("connection", (socket) => {
     const name = getRandomName();
  
 
-    nearByUsers.set(socket.id, { name, ipPrefixes: new Set(),  inFlight: false });
+    const peer = new Peer(socket , socket.request);
+    nearBy.set(socket.id , { name , ipPrefixes: peer.ip , inFlight : false , isPrivate: peer.isPrivate })
 
     socket.on("createFlight", (callback) => {
         let code;
@@ -120,13 +121,12 @@ io.on("connection", (socket) => {
             ownerId: socket.id,
             members: [socket.id],
             ownerConnected: true,
-            disconnectTimeout: null,
         });
 
-        const user = nearByUsers.get(socket.id);
+        const user = nearBy.get(socket.id);
         if (user) {
             user.inFlight = true;
-            nearByUsers.set(socket.id, user);
+            nearBy.set(socket.id, user);
         }
 
         Stat.updateOne(
@@ -181,8 +181,8 @@ io.on("connection", (socket) => {
         io.to(targetId).socketsJoin(code);
 
         // Inform both clients about the room code and participants
-        const senderName = nearByUsers.get(socket.id)?.name || "Unknown";
-        const receiverName = nearByUsers.get(targetId)?.name || "Unknown";
+        const senderName = nearBy.get(socket.id)?.name || "Unknown";
+        const receiverName = nearBy.get(targetId)?.name || "Unknown";
 
         io.to(code).emit("flightStarted", {
             code,
@@ -216,7 +216,7 @@ io.on("connection", (socket) => {
 
 
         // Notify the invited user to go to the flight page
-        const inviterName = nearByUsers.get(socket.id)?.name || "Someone";
+        const inviterName = nearBy.get(socket.id)?.name || "Someone";
 
         io.to(targetId).emit("invitedToFlight", {
             flightCode,
@@ -227,27 +227,13 @@ io.on("connection", (socket) => {
         callback?.({ success: true });
     });
 
-    
-    socket.on("registerLocalIp", ({ localIP }) => {
-    // const user = nearByUsers.get(socket.id);
-    // if (user && typeof localIP === "string") {
-    //         const prefix = localIP.split(".").slice(0, 3).join(".");
-            
-    //         // Replace old prefixes with only the current one
-    //         user.ipPrefixes = new Set([prefix]);
-            
-    //         nearByUsers.set(socket.id, user);
-
-    //     }
-    });
-
-
-
-
     socket.on("getNearbyUsers", () => {
         broadcastNearbyUsers(socket);
     });
+
     socket.on("joinFlight", (code, callback) => {
+        
+        console.log("User wants to join .")
         if (flights.has(code)) {
             const flight = flights.get(code);
 
@@ -255,6 +241,8 @@ io.on("connection", (socket) => {
                 callback({ success: false, message: "Flight is full" });
                 return;
             }
+            
+            console.log(code);
 
 
             socket.join(code);
@@ -263,16 +251,20 @@ io.on("connection", (socket) => {
                 socket.emit("offer", flight.ownerId, { sdp: flight.sdp });
             }
 
-            const user = nearByUsers.get(socket.id);
+            const user = nearBy.get(socket.id);
             if (user) {
                 user.inFlight = true;
-                nearByUsers.set(socket.id, user);
+                nearBy.set(socket.id, user);
             }
 
+            // USER LOG 
+            
 
             callback({ success: true });
             broadcastUsers(code);
         } else {
+
+            console.log("Failed");
             callback({ success: false, message: "flight not found" });
         }
     });
@@ -299,10 +291,10 @@ io.on("connection", (socket) => {
     });
 
     socket.on("leaveFlight", () => {
-  const user = nearByUsers.get(socket.id);
+  const user = nearBy.get(socket.id);
   if (user) {
     user.inFlight = false;
-    nearByUsers.set(socket.id, user);
+    nearBy.set(socket.id, user);
   }
 
   let flightCodeToDelete  = "";
@@ -330,7 +322,7 @@ io.on("connection", (socket) => {
 
     socket.on("disconnect", () => {
 
-        nearByUsers.delete(socket.id);
+        nearBy.delete(socket.id);
 
 
         for (const [code, flight] of flights.entries()) {

@@ -4,6 +4,6 @@ config({
   path: `.env.${process.env.NODE_ENV || 'development'}.local`
 });
 
-export const { DB_URI
+export const { DB_URI, NODE_ENV
  } = process.env;
 
