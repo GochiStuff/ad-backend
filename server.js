@@ -16,7 +16,7 @@ const app = express();
 app.use(express.json());
 const server = http.createServer(app);
 app.use(cors({
-  origin: ["https://airdelivery.site", "http://localhost:3000"],
+  origin: ["https://airdelivery.site", "https://api.airdelivery.site" , "http://localhost:3000"],
   methods: ["GET", "POST"],
   credentials: true
 }));
@@ -27,7 +27,7 @@ const conf = { debug : true }
 
 const io = new Server(server, {
     cors: {
-        origin: ["https://airdelivery.site", "http://localhost:3000" , ""],
+        origin: ["https://airdelivery.site", "https://api.airdelivery.site" ,  "http://localhost:3000" , ""],
         methods: ["GET", "POST"],
         credentials: true
     }
