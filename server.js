@@ -11,7 +11,7 @@ import Peer from "./peer.js";
 function generateCode() {
     return nanoid(6).toUpperCase();
 }
-
+    
 const app = express();
 app.use(express.json());
 const server = http.createServer(app);
@@ -22,8 +22,8 @@ app.use(cors({
 }));
 
 
-
-
+// config 
+const conf = { debug : true }
 
 const io = new Server(server, {
     cors: {
@@ -118,7 +118,7 @@ io.on("connection", (socket) => {
     const name = getRandomName();
  
 
-    const peer = new Peer(socket , socket.request);
+    const peer = new Peer(socket , socket.request , conf);
     nearBy.set(socket.id, {name, ipPrefix: peer.ipPrefix, isPrivate: peer.isPrivate, ip: peer.ip, inFlight: false });
 
 
@@ -244,7 +244,7 @@ io.on("connection", (socket) => {
 
     socket.on("joinFlight", (code, callback) => {
         
-        console.log("User wants to join .")
+        
         if (flights.has(code)) {
             const flight = flights.get(code);
 
@@ -253,7 +253,6 @@ io.on("connection", (socket) => {
                 return;
             }
             
-            console.log(code);
 
 
             socket.join(code);
@@ -269,7 +268,9 @@ io.on("connection", (socket) => {
             }
 
             // USER LOG 
-            console.log("SUCCESS");
+            if( conf.debug){
+                console.log("SUCCESS USER JOINs : " , code );
+            }
             
 
             callback({ success: true });

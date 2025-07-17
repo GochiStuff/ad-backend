@@ -2,7 +2,8 @@
 
 export default class Peer{
 
-    constructor( socket , request){
+    constructor( socket , request , config){
+        this.config = config;
         this.ipv6Localize = 3;
         this.socket = socket;
         this._setIP(request);
@@ -43,7 +44,9 @@ export default class Peer{
         // Public IPs by /16 prefix: 45.250.48.206 → 45.250
 
         //  DEBUG 
-        console.log("NEW IP:", this.ip, "| Private:", this.isPrivate, "| Prefix:", this.ipPrefix);
+        if(this.config.debug){
+            console.log("NEW IP:", this.ip, "| Private:", this.isPrivate, "| Prefix:", this.ipPrefix);
+        }
         
         
     }
