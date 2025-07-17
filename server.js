@@ -109,7 +109,7 @@ function broadcastUsers(flightCode) {
 
 // rest . 
 app.use("/api/v1/feedback" ,feedbackRoute);
-app.get("/health", (req, res) => {
+app.get("/api/v1/health", (req, res) => {
     res.status(200).send("OK");
 });
 
