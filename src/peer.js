@@ -10,9 +10,6 @@ export default class Peer{
 
     }
 
-    // rate limiter 
-
-
     // set user ip 
     _setIP(request){
         // Extract real 
