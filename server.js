@@ -58,7 +58,7 @@ function getRandomName() {
 
 
 
-// { ownerId: socketId, members: [socketId] }
+// {flight id , members: [socketId] }
 const flights = new Map();
 // socketid -> { name, ipPrefix, inFlight: boolean }
 const nearBy = new Map(); // this is called nearby but is handling users .
@@ -133,6 +133,7 @@ io.on("connection", (socket) => {
             ownerId: socket.id,
             members: [socket.id],
             ownerConnected: true,
+
         });
 
         const user = nearBy.get(socket.id);
