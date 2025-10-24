@@ -9,15 +9,15 @@ import { generateCode } from "./utils/code.js";
 import feedbackRoute from "./routes/feedback.route.js"
 import { getRandomName } from "./utils/names.js";
 import { NODE_ENV, PORT } from "./config/index.js";
+import mongoose from "mongoose"; // Added import for SIGINT handler
+import logger from "./utils/logger.js"; // Import the new logger
 
-
+const logContext = "Server";
 
 // { ownerId: socketId, members: [socketId] }
 const flights = new Map();
 // socketid -> { name, ipPrefix, inFlight: boolean }
 const users = new Map(); // this is called users but is handling users .
-
-
 
 
 const app = express();
@@ -35,8 +35,9 @@ app.use(cors({
 // routes
 
 // rest . 
-app.use("/api/v1/feedback" ,feedbackRoute);
+app.use("/api/v1/feedback", feedbackRoute);
 app.get("/api/v1/health", (req, res) => {
+    logger.debug(logContext, 'Health check request received');
     res.status(200).send("OK");
 });
 
@@ -57,7 +58,10 @@ const io = new Server(server, {
 
 function broadcastNearbyUsers(socket) {
     const user = users.get(socket.id);
-    if (!user || !user.ipPrefix) return;
+    if (!user || !user.ipPrefix) {
+        logger.debug('broadcastNearbyUsers', 'User or IP prefix not found, skipping.', { socketId: socket.id });
+        return;
+    }
 
     const nearby = Array.from(users.entries())
         .filter(([id, data]) => {
@@ -78,20 +82,28 @@ function broadcastNearbyUsers(socket) {
         })
         .map(([id, data]) => ({ id, name: data.name }));
 
+    logger.debug('broadcastNearbyUsers', `Broadcasting ${nearby.length} nearby users.`, { socketId: socket.id });
     socket.emit("nearbyUsers", nearby);
 }
 
 
 function broadcastUsers(flightCode) {
     const flight = flights.get(flightCode);
-    if (!flight) return;
+    if (!flight) {
+        logger.debug('broadcastUsers', 'Flight not found, skipping broadcast.', { flightCode });
+        return;
+    }
+
+    const members = flight.members.map(id => ({
+        id,
+        name: users.get(id)?.name || "Unknown"
+    }));
+
+    logger.debug('broadcastUsers', 'Broadcasting flight users', { flightCode, memberCount: members.length, ownerId: flight.ownerId });
 
     io.to(flightCode).emit("flightUsers", {
         ownerId: flight.ownerId,
-        members: flight.members.map(id => ({
-            id,
-            name: users.get(id)?.name || "Unknown"
-        })),
+        members: members,
         ownerConnected: flight.ownerConnected
     });
 }
@@ -99,15 +111,19 @@ function broadcastUsers(flightCode) {
 
 // socket 
 io.on("connection", (socket) => {
+    const logContext = `Socket[${socket.id}]`;
+    logger.debug(logContext, 'New socket connected');
 
     const name = getRandomName();
 
 
-    const peer = new Peer(socket, socket.request, { debug : NODE_ENV === 'development' });
+    const peer = new Peer(socket, socket.request, { debug: NODE_ENV === 'development' });
     users.set(socket.id, { name, ipPrefix: peer.ipPrefix, isPrivate: peer.isPrivate, ip: peer.ip, inFlight: false });
+    logger.debug(logContext, 'User created and stored', { name, ipPrefix: peer.ipPrefix, ip: peer.ip });
 
 
     socket.on("createFlight", (callback) => {
+        logger.debug(logContext, 'Event: createFlight');
         let code;
         do {
             code = generateCode();
@@ -118,18 +134,21 @@ io.on("connection", (socket) => {
             members: [socket.id],
             ownerConnected: true,
         });
+        logger.debug(logContext, `Flight created`, { code });
 
         const user = users.get(socket.id);
         if (user) {
             user.inFlight = true;
             users.set(socket.id, user);
         }
+        if (process.env.DB_URI) {
+            Stat.updateOne(
+                { date: { $gte: new Date().setHours(0, 0, 0, 0) } },
+                { $inc: { totalFlights: 1 } },
+                { upsert: true }
+            ).exec();
+        }
 
-        Stat.updateOne(
-            { date: { $gte: new Date().setHours(0, 0, 0, 0) } },
-            { $inc: { totalFlights: 1 } },
-            { upsert: true }
-        ).exec();
         socket.join(code);
         callback({ code });
 
@@ -137,25 +156,30 @@ io.on("connection", (socket) => {
     });
 
     socket.on("updateStats", ({ filesShared, Transferred }) => {
-
+        logger.debug(logContext, 'Event: updateStats', { filesShared, Transferred });
 
         // Data recived in MB 
-        Stat.updateOne(
-            { date: { $gte: new Date().setHours(0, 0, 0, 0) } },
-            {
-                $inc: {
-                    totalFilesShared: filesShared || 0,
-                    totalMBTransferred: Transferred || 0,
+        if (process.env.DB_URI) {
+            Stat.updateOne(
+                { date: { $gte: new Date().setHours(0, 0, 0, 0) } },
+                {
+                    $inc: {
+                        totalFilesShared: filesShared || 0,
+                        totalMBTransferred: Transferred || 0,
+                    },
                 },
-            },
-            { upsert: true }
-        ).exec();
+                { upsert: true }
+            ).exec();
+        }
+
     });
 
 
 
     socket.on("requestToConnect", (targetId, callback) => {
+        logger.debug(logContext, 'Event: requestToConnect', { targetId });
         if (!io.sockets.sockets.has(targetId)) {
+            logger.warn(logContext, 'requestToConnect: Target user not found', { targetId });
             callback({ success: false, message: "User not found or offline" });
             return;
         }
@@ -172,6 +196,7 @@ io.on("connection", (socket) => {
             ownerConnected: true,
             disconnectTimeout: null,
         });
+        logger.debug(logContext, 'requestToConnect: P2P flight created', { code, members: [socket.id, targetId] });
 
         socket.join(code);
         io.to(targetId).socketsJoin(code);
@@ -193,18 +218,22 @@ io.on("connection", (socket) => {
 
 
     socket.on("inviteToFlight", ({ targetId, flightCode }, callback) => {
+        logger.debug(logContext, 'Event: inviteToFlight', { targetId, flightCode });
         const flight = flights.get(flightCode);
         if (!flight) {
+            logger.warn(logContext, 'inviteToFlight: Flight not found', { flightCode });
             callback?.({ success: false, message: "Flight not found" });
             return;
         }
 
         if (!flight.members.includes(socket.id)) {
+            logger.warn(logContext, 'inviteToFlight: User not part of flight', { flightCode });
             callback?.({ success: false, message: "You are not part of this flight" });
             return;
         }
 
         if (!io.sockets.sockets.has(targetId)) {
+            logger.warn(logContext, 'inviteToFlight: Target user not connected', { targetId });
             callback?.({ success: false, message: "Target user not connected" });
             return;
         }
@@ -219,21 +248,23 @@ io.on("connection", (socket) => {
             fromId: socket.id,
             fromName: inviterName,
         });
-
+        logger.debug(logContext, 'inviteToFlight: Invite sent successfully', { targetId, flightCode });
         callback?.({ success: true });
     });
 
     socket.on("getNearbyUsers", () => {
+        logger.debug(logContext, 'Event: getNearbyUsers');
         broadcastNearbyUsers(socket);
     });
 
     socket.on("joinFlight", (code, callback) => {
-
+        logger.debug(logContext, 'Event: joinFlight', { code });
 
         if (flights.has(code)) {
             const flight = flights.get(code);
 
             if (flight.members.length >= 2) {
+                logger.warn(logContext, 'joinFlight: Flight is full', { code });
                 callback({ success: false, message: "Flight is full" });
                 return;
             }
@@ -252,43 +283,47 @@ io.on("connection", (socket) => {
                 users.set(socket.id, user);
             }
 
-            // USER LOG 
-            if (NODE_ENV === 'development') {
-                console.log("SUCCESS USER JOINs : ", code);
-            }
+            logger.debug(logContext, 'joinFlight: User joined successfully', { code });
 
 
             callback({ success: true });
             broadcastUsers(code);
         } else {
-
-            console.log("Failed");
+            logger.warn(logContext, 'joinFlight: Flight not found', { code });
             callback({ success: false, message: "flight not found" });
         }
     });
     socket.on("offer", (code, sdp) => {
+        logger.debug(logContext, 'Event: offer', { code });
         const flight = flights.get(code);
         if (!flight) {
-            console.error(`No flight found for code: ${code}`);
+            logger.error(logContext, `offer: No flight found for code: ${code}`);
             return;
         }
         flight.sdp = sdp;
 
     });
     socket.on("answer", (code, { sdp }) => {
+        logger.debug(logContext, 'Event: answer', { code });
         const flight = flights.get(code);
         if (flight && io.sockets.sockets.get(flight.ownerId)) {
-            io.to(flight.ownerId).emit("answer", { from: socket.id, sdp });
+            io.to(flight.ownerId).emit("answer", { id: socket.id, sdp });
+        } else {
+            logger.warn(logContext, 'answer: Could not send answer, flight or owner not found', { code, ownerId: flight?.ownerId });
         }
     });
 
     socket.on("ice-candidate", (payload) => {
+        logger.debug(logContext, 'Event: ice-candidate', { to: payload?.id });
         if (payload && payload.id && payload.candidate) {
-            io.to(payload.id).emit("ice-candidate", { from: socket.id, candidate: payload.candidate });
+            io.to(payload.id).emit("ice-candidate", { id: socket.id, candidate: payload.candidate });
+        } else {
+            logger.warn(logContext, 'ice-candidate: Invalid payload received', { payload });
         }
     });
 
     socket.on("leaveFlight", () => {
+        logger.debug(logContext, 'Event: leaveFlight');
         const user = users.get(socket.id);
         if (user) {
             user.inFlight = false;
@@ -302,11 +337,13 @@ io.on("connection", (socket) => {
                 flight.ownerConnected = false;
                 broadcastUsers(code);
                 flightCodeToDelete = code;
+                logger.debug(logContext, 'leaveFlight: Owner left, marking flight for deletion', { code });
                 break;
             } else {
                 const wasMember = flight.members.includes(socket.id);
                 flight.members = flight.members.filter(id => id !== socket.id);
                 if (wasMember) {
+                    logger.debug(logContext, 'leaveFlight: Member left', { code });
                     broadcastUsers(code);
                     break;
                 }
@@ -315,25 +352,28 @@ io.on("connection", (socket) => {
 
         if (flightCodeToDelete) {
             flights.delete(flightCodeToDelete);
+            logger.debug(logContext, 'leaveFlight: Flight deleted', { code: flightCodeToDelete });
         }
     });
 
     socket.on("disconnect", () => {
-
+        logger.debug(logContext, 'Event: disconnect');
         users.delete(socket.id);
-
 
         for (const [code, flight] of flights.entries()) {
 
             if (flight.ownerId === socket.id) {
-
+                logger.debug(logContext, 'disconnect: Owner disconnected, deleting flight', { code });
                 flight.ownerConnected = false;
                 broadcastUsers(code);
                 flights.delete(code);
             } else {
-
+                const initialCount = flight.members.length;
                 flight.members = flight.members.filter(id => id !== socket.id);
-                broadcastUsers(code);
+                if (initialCount > flight.members.length) {
+                    logger.debug(logContext, 'disconnect: Member disconnected, removed from flight', { code });
+                    broadcastUsers(code);
+                }
             }
         }
 
@@ -344,11 +384,12 @@ io.on("connection", (socket) => {
 
 
 setInterval(() => {
+    logger.debug('Cleanup', 'Running inactive flight cleanup task...');
     for (const [code, flight] of flights.entries()) {
         const inactiveTooLong = flight.members.length === 0 || !flight.ownerConnected;
         if (inactiveTooLong) {
             flights.delete(code);
-            console.log(`[CLEANUP] Removed inactive flight: ${code}`);
+            logger.info('Cleanup', `Removed inactive flight: ${code}`);
         }
     }
 }, 120 * 1000); // every 120 seconds
@@ -358,19 +399,25 @@ setInterval(() => {
 
 server.listen(PORT, async () => {
     try {
-        await connectDB()
-        console.log(` Server running on port ${PORT}`);
+        if (!process.env.DB_URI) {
+            logger.info(logContext, `Server running on port ${PORT}, skipping DB connection (DEV mode)`);
+        } else {
+            await connectDB()
+            logger.info(logContext, `Server running on port ${PORT}, DB connected`);
+        }
     } catch (err) {
-        console.error(' DB connection failed:', err.message)
+        logger.error(logContext, 'DB connection failed on startup', err);
         process.exit(1)
     }
 });
 
 process.on('SIGINT', () => {
-    console.log(' Shutting down...');
+    logger.info('Process', 'Shutting down...');
     server.close(async () => {
-        await mongoose.disconnect();
-        console.log('  DB connection closed.');
+        if (process.env.DB_URI) {
+            await mongoose.disconnect();
+            logger.info('Process', 'DB connection closed.');
+        }
         process.exit(0);
     });
 });
