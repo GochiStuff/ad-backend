@@ -1,13 +1,18 @@
 import mongoose from "mongoose";
-import { DB_URI } from "../config/index.js";
+import dotenv from "dotenv";
 
-const MONGODB_URI = DB_URI;
+// Load environment variables safely
+dotenv.config();
 
-if (!MONGODB_URI) {
-  throw new Error("Please define the MONGODB_URI environment variable inside .env");
-}
+// Use a fallback or warning if no URI is provided
+const MONGODB_URI = process.env.DB_URI || process.env.MONGODB_URI;
 
 export async function connectDB() {
+  if (!MONGODB_URI) {
+    console.warn("[MongoDB] Warning: No MongoDB URI found. Skipping connection.");
+    return;
+  }
+
   if (mongoose.connection.readyState >= 1) {
     console.log("[MongoDB] Already connected.");
     return;
@@ -18,7 +23,7 @@ export async function connectDB() {
   });
 
   mongoose.connection.on("error", (err) => {
-    console.log(`[MongoDB] Connection error: ${err.message}`);
+    console.error(`[MongoDB] Connection error: ${err.message}`);
   });
 
   mongoose.connection.on("disconnected", () => {
@@ -30,10 +35,16 @@ export async function connectDB() {
   });
 
   try {
-    await mongoose.connect(MONGODB_URI);
-
+    await mongoose.connect(MONGODB_URI, {
+      // Optional recommended options
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      autoIndex: false,
+      serverSelectionTimeoutMS: 10000,
+    });
   } catch (error) {
     console.error(`[MongoDB] Initial connection error: ${error.message}`);
-    throw error;
+    // Don’t crash app on open-source version
+    console.warn("[MongoDB] Skipping DB connection (dev/FOSS mode).");
   }
 }
